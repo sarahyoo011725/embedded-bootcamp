@@ -36,8 +36,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define GPIO_Port GPIOB
-#define GPIO_Pin GPIO_PIN_8
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,19 +46,14 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-const uint8_t MCP3004_SIG_CH0 = 0b11000000;
-const uint8_t MCP3004_SIG_CH1 = 0b11001000;
-const uint8_t MCP3004_SIG_CH2 = 0b11010000;
-const uint8_t MCP3004_SIG_CH3 = 0b11011000;
-const uint8_t MCP3004_DIF_CH0_INP_CH1_INN = 0b10000000;
-const uint8_t MCP3004_DIF_CH0_INN_CH1_INP = 0b10001000;
-const uint8_t MCP3004_DIF_CH2_INP_CH3_INN = 0b10010000;
-const uint8_t MCP3004_DIF_CH2_INN_CH3_INP = 0b10011000;
-
-const int timer_period = 59999; //ARR + 1 ?
-//duty cycle range: from 5% to 10%
-const int min_duty_cycle_count = timer_period * 0.05;
-const int max_duty_cycle_count = timer_period * 0.10;
+const uint8_t MCP3004_SIG_CH0 = 0b10000000;
+const uint8_t MCP3004_SIG_CH1 = 0b10010000;
+const uint8_t MCP3004_SIG_CH2 = 0b10100000;
+const uint8_t MCP3004_SIG_CH3 = 0b10110000;
+const uint8_t MCP3004_DIF_CH0_INP_CH1_INN = 0b00000000;
+const uint8_t MCP3004_DIF_CH0_INN_CH1_INP = 0b00001000;
+const uint8_t MCP3004_DIF_CH2_INP_CH3_INN = 0b00010000;
+const uint8_t MCP3004_DIF_CH2_INN_CH3_INP = 0b00011000;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -103,7 +96,15 @@ int main(void)
   MX_TIM1_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_SET);  //set CS pin high by default
+  //	  first byte: 1	   				  dummy bits (not cared)
+  uint8_t tx[3] = {0x01, MCP3004_SIG_CH0, 0x00};
+  uint8_t rx[3] = {0};
+
+  const int AAR = __HAL_TIM_GET_AUTORELOAD(&htim1); //counter period
+  const int min_duty_cycle_count = AAR * 0.05;
+  const int max_duty_cycle_count = AAR * 0.10;
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);  //set CS pin high by default
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   /* USER CODE END 2 */
 
@@ -114,19 +115,20 @@ int main(void)
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
 	//get ADC value
-	uint8_t tx[3] = {MCP3004_SIG_CH0, 0x00, 0x00};
-	uint8_t rx[3] = {0};
+	rx[0] = 0;
+	rx[1] = 0;
+	rx[2] = 0;
 
-	HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
 	HAL_SPI_TransmitReceive(&hspi1, tx, rx, 3, 100);
-	HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
 
 	//the first 8 bits, rx[0], are null bit
 	//so keep B9 and B8 (the last 2 bits), shift it 8 bits to the left, and combine with bits of B7 to B0.
 	uint16_t adc_value = ((rx[1] & 0x03) << 8) | rx[2];
 
-	//get corresponding counts to duty cycle
-	uint32_t ccr_value = min_duty_cycle_count + (adc_value * max_duty_cycle_count - min_duty_cycle_count) / 1023;
+	//map ADC value to the duty cycle range
+	uint32_t ccr_value = min_duty_cycle_count + (adc_value * (max_duty_cycle_count - min_duty_cycle_count)) / 1023;
 
 	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr_value);
 
