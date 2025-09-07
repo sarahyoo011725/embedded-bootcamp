@@ -19,12 +19,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stm32f0xx_hal_tim.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,6 +36,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define GPIO_Port GPIOB
+#define GPIO_Pin GPIO_PIN_8
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,18 +48,28 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+const uint8_t MCP3004_SIG_CH0 = 0b11000000;
+const uint8_t MCP3004_SIG_CH1 = 0b11001000;
+const uint8_t MCP3004_SIG_CH2 = 0b11010000;
+const uint8_t MCP3004_SIG_CH3 = 0b11011000;
+const uint8_t MCP3004_DIF_CH0_INP_CH1_INN = 0b10000000;
+const uint8_t MCP3004_DIF_CH0_INN_CH1_INP = 0b10001000;
+const uint8_t MCP3004_DIF_CH2_INP_CH3_INN = 0b10010000;
+const uint8_t MCP3004_DIF_CH2_INN_CH3_INP = 0b10011000;
 
+const int timer_period = 59999; //ARR + 1 ?
+//duty cycle range: from 5% to 10%
+const int min_duty_cycle_count = timer_period * 0.05;
+const int max_duty_cycle_count = timer_period * 0.10;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 /* USER CODE END 0 */
 
 /**
@@ -65,7 +79,6 @@ void SystemClock_Config(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -87,8 +100,11 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_TIM1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_SET);  //set CS pin high by default
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -96,8 +112,25 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
+	//get ADC value
+	uint8_t tx[3] = {MCP3004_SIG_CH0, 0x00, 0x00};
+	uint8_t rx[3] = {0};
+
+	HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_RESET);
+	HAL_SPI_TransmitReceive(&hspi1, tx, rx, 3, 100);
+	HAL_GPIO_WritePin(GPIO_Port, GPIO_Pin, GPIO_PIN_SET);
+
+	//the first 8 bits, rx[0], are null bit
+	//so keep B9 and B8 (the last 2 bits), shift it 8 bits to the left, and combine with bits of B7 to B0.
+	uint16_t adc_value = ((rx[1] & 0x03) << 8) | rx[2];
+
+	//get corresponding counts to duty cycle
+	uint32_t ccr_value = min_duty_cycle_count + (adc_value * max_duty_cycle_count - min_duty_cycle_count) / 1023;
+
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr_value);
+
+	HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -122,6 +155,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -143,7 +177,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
 /* USER CODE END 4 */
 
 /**
@@ -160,8 +193,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
@@ -177,5 +209,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
